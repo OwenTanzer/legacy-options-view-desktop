@@ -42,6 +42,7 @@ from utils import (
     _ensure_calendar_loaded, next_trading_day, nominal_friday, prior_trading_day,
     target_expirations,
 )
+from oi_buckets import effective_thresholds, oi_bucket
 
 # ── paths and remote data ──────────────────────────────────────────────────────
 
@@ -237,43 +238,6 @@ def load_intraday(exp_date: date) -> pd.DataFrame | None:
     except Exception as e:
         _log.debug(f"yfinance intraday fallback failed for {exp_date}: {e}")
         return None
-
-
-def effective_thresholds(tier: str, ranges: pd.DataFrame, offsets: list[int]) -> dict:
-    """
-    {offset: {"call": [p25,p50,p75,p90], "put": [p25,p50,p75,p90]}}
-    Non-Regular tiers scale the Regular thresholds by their median adj multiplier.
-    """
-    reg = ranges[ranges["Tier"] == "0DTE_Regular"].set_index("StrikeOffset")
-    adj = (ranges[ranges["Tier"] == tier].set_index("StrikeOffset")
-           if tier != "0DTE_Regular" else None)
-
-    out = {}
-    for o in offsets:
-        if o not in reg.index:
-            out[o] = {"call": [0]*4, "put": [0]*4}
-            continue
-        r  = reg.loc[o]
-        cp = [r["Call_p25"], r["Call_p50"], r["Call_p75"], r["Call_p90"]]
-        pp = [r["Put_p25"],  r["Put_p50"],  r["Put_p75"],  r["Put_p90"]]
-        if adj is not None and o in adj.index:
-            ca = float(adj.loc[o, "Call_adj"] or 1.0)
-            pa = float(adj.loc[o, "Put_adj"]  or 1.0)
-            cp = [v * ca for v in cp]
-            pp = [v * pa for v in pp]
-        out[o] = {"call": cp, "put": pp}
-    return out
-
-
-def oi_bucket(oi: float, thresholds: list) -> int:
-    if oi == 0:
-        return 0
-    p25, p50, p75, p90 = thresholds
-    if oi < p25: return 1
-    if oi < p50: return 2
-    if oi < p75: return 3
-    if oi < p90: return 4
-    return 5
 
 
 def fmt_oi(v: int) -> str:
